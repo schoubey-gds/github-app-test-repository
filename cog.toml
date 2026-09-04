@@ -1,7 +1,13 @@
 disable_changelog = true
 ignore_merge_commits = true
 
-# Write the computed version into package.json so it is part of the bump commit.
+# cocogitto keeps a BARE semver in package.json (via the pre_bump hook below)
+# and only prefixes the git TAG with "v" (e.g. v0.2.0), matching the
+# "refs/tags/v*" tag ruleset.
+tag_prefix = "v"
+
+# Write the computed (bare) version into package.json so it is part of the
+# bump commit cocogitto creates.
 pre_bump_hooks = [
   "npm version {{version}} --no-git-tag-version --allow-same-version",
 ]
