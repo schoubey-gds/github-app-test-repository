@@ -12,8 +12,11 @@ on:
       - "v*.*.*"        # only semver v-tags trigger a publish
   workflow_dispatch: {} # manual re-run (still gated by the environment below)
 
-# Default to least privilege at the top level.
+# Top-level permissions. id-token:write MUST be here (not only at job level):
+# it is the sole gate for minting the GitHub OIDC token that npm trusted
+# publishing requires. This mirrors the known-working publish workflow.
 permissions:
+  id-token: write   # REQUIRED for npm OIDC trusted publishing
   contents: read
 
 concurrency:
@@ -90,6 +93,18 @@ jobs:
 
       - name: Test (if a test script exists)
         run: npm test --if-present
+
+      # TEMPORARY DIAGNOSTIC — remove once publishing works. Proves whether the
+      # OIDC token endpoint is actually available to this job (i.e. whether
+      # id-token: write is in effect). If ACTIONS_ID_TOKEN_REQUEST_URL is empty,
+      # OIDC is NOT enabled and npm cannot authenticate — the problem is the
+      # permission/environment, not npm. Prints versions too.
+      - name: Diagnose OIDC availability
+        run: |
+          echo "node: $(node --version)"
+          echo "npm:  $(npm --version)"
+          echo "ACTIONS_ID_TOKEN_REQUEST_URL is set? => ${ACTIONS_ID_TOKEN_REQUEST_URL:+YES}${ACTIONS_ID_TOKEN_REQUEST_URL:-NO}"
+          echo "ACTIONS_ID_TOKEN_REQUEST_TOKEN is set? => ${ACTIONS_ID_TOKEN_REQUEST_TOKEN:+YES}${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-NO}"
 
       # Staged publish via OIDC. Authentication is the short-lived OIDC
       # credential (id-token: write); provenance is emitted AUTOMATICALLY for a
