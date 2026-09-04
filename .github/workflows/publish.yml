@@ -44,13 +44,23 @@ jobs:
           persist-credentials: false   # no git creds needed after checkout
 
       # actions/setup-node v4.4.0
+      #
+      # node-version is pinned to 24 (NOT .nvmrc's 22.22.3): npm's OIDC
+      # trusted-publishing codepath is only reliably entered on Node 24+ (npm's
+      # own docs examples use Node 24, and multiple reports show Node 22.x does
+      # not trigger the OIDC exchange, yielding ENEEDAUTH). The release job
+      # still uses .nvmrc; only publish needs the newer Node for OIDC.
+      #
+      # We intentionally do NOT set `registry-url` here. `registry-url` makes
+      # setup-node write a temp .npmrc containing
+      # `//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}` plus always-auth,
+      # which forces TOKEN auth and SUPPRESSES the OIDC flow (the cause of the
+      # ENEEDAUTH failures). Without it, npm defaults to the public registry
+      # and performs the OIDC token exchange automatically.
       - name: Setup Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
-          node-version-file: .nvmrc
-          registry-url: "https://registry.npmjs.org"
-          # Caching is intentionally NOT enabled (the `cache` input is omitted):
-          # release builds should install fresh from the lockfile every time.
+          node-version: "24"
 
       # Integrity gate (replay / wrong-artifact defense): the tag being
       # published MUST match the version in package.json. A stale, manual, or
@@ -67,12 +77,10 @@ jobs:
           fi
 
       # npm OIDC trusted publishing requires npm CLI >= 11.5.1. The runner's
-      # bundled npm may be older, so upgrade explicitly. We pin to the npm 12.x
-      # line rather than @latest so a future major bump can't outrun the Node
-      # version pinned in .nvmrc. npm 12.x requires Node >= 22.22.2, which our
-      # pinned Node 22.22.3 satisfies.
+      # bundled npm may be older, so upgrade explicitly. Node 24 supports the
+      # latest npm, so we take @latest (which is well ahead of 11.5.1).
       - name: Ensure npm >= 11.5.1
-        run: npm install -g "npm@^12"
+        run: npm install -g npm@latest
 
       - name: Install dependencies
         run: npm ci
@@ -87,12 +95,10 @@ jobs:
       # credential (id-token: write); provenance is emitted AUTOMATICALLY for a
       # public repo + public package under OIDC, so we do NOT pass --provenance.
       #
-      # CRITICAL: actions/setup-node with `registry-url` writes an .npmrc with
-      # `//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}` and exports an
-      # (empty) NODE_AUTH_TOKEN. If that env var is present, npm uses TOKEN auth
-      # instead of OIDC — and the empty token yields `E401 Unable to
-      # authenticate`. We explicitly clear NODE_AUTH_TOKEN for this step so npm
-      # falls through to the OIDC trusted-publishing flow.
+      # We removed setup-node's `registry-url` (which would write a token-based
+      # .npmrc that suppresses OIDC). NODE_AUTH_TOKEN is also cleared here as a
+      # belt-and-suspenders guard so no inherited/injected token can push npm
+      # back onto the token-auth path instead of OIDC.
       #
       # `npm stage publish` holds the version privately until a maintainer
       # approves it with 2FA on npmjs.com (or via `npm stage approve`), which
