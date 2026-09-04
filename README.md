@@ -6,6 +6,6 @@ Use this template to quickly populate a repo with common files
 ## Licence
 [MIT License](LICENSE)
 
-TEST 1
+TEST 1m2
 
 plan chat kiro-cli --resume-id 2994dc51-232a-45cf-8454-683e49734a48
