@@ -83,13 +83,21 @@ jobs:
       - name: Test (if a test script exists)
         run: npm test --if-present
 
-      # Staged publish via OIDC. No NODE_AUTH_TOKEN / npm token anywhere:
-      # authentication is the short-lived OIDC credential (id-token: write).
-      # Provenance is emitted AUTOMATICALLY for a public repo + public package
-      # under OIDC, so we do NOT pass --provenance.
+      # Staged publish via OIDC. Authentication is the short-lived OIDC
+      # credential (id-token: write); provenance is emitted AUTOMATICALLY for a
+      # public repo + public package under OIDC, so we do NOT pass --provenance.
+      #
+      # CRITICAL: actions/setup-node with `registry-url` writes an .npmrc with
+      # `//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}` and exports an
+      # (empty) NODE_AUTH_TOKEN. If that env var is present, npm uses TOKEN auth
+      # instead of OIDC — and the empty token yields `E401 Unable to
+      # authenticate`. We explicitly clear NODE_AUTH_TOKEN for this step so npm
+      # falls through to the OIDC trusted-publishing flow.
       #
       # `npm stage publish` holds the version privately until a maintainer
       # approves it with 2FA on npmjs.com (or via `npm stage approve`), which
       # cannot be done over OIDC — that manual step is the final gate.
       - name: Stage publish to npm (OIDC, auto provenance)
+        env:
+          NODE_AUTH_TOKEN: ""
         run: npm stage publish
