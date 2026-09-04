@@ -11,7 +11,14 @@ permissions:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # MUST be false. The release job pushes its own bump commit to main, which
+  # re-triggers this workflow. With cancel-in-progress: true the second run
+  # cancels the first *mid-flight* (concurrency cancellation happens before the
+  # job-level `if` guard runs) — verified on v0.4.0, where "Create GitHub
+  # release" was cancelled during its "not yet discoverable, retrying" wait, so
+  # the tag was never created. The re-triggered run is a harmless no-op
+  # (skipped by the chore(version) guard), so let the first run finish.
+  cancel-in-progress: false
 
 jobs:
   create-release:
@@ -63,10 +70,23 @@ jobs:
           git-user: "release-bot[bot]"
           git-user-email: "release-bot[bot]@users.noreply.github.com"
 
-      # Push the bump commit and the tag using the App token.
+      # Push the bump commit, then the tag EXPLICITLY.
+      #
+      # cocogitto 6.4.0 creates a LIGHTWEIGHT tag. `git push --follow-tags`
+      # only pushes ANNOTATED tags (verified against git-scm.com docs and by
+      # test), so it would push the commit and SILENTLY skip the tag while
+      # still exiting 0 — leaving a bumped package.json with no matching tag on
+      # the remote, so publish.yml (which triggers on v* tag pushes) never
+      # fires. We therefore push the tag by its exact ref.
+      #
+      # steps.release.outputs.version is `git describe` of the newest tag, i.e.
+      # the v-prefixed tag name (e.g. v0.4.0).
       - name: Push bump commit and tag
         if: steps.release.outputs.version != ''
-        run: git push --follow-tags origin HEAD:main
+        run: |
+          set -euo pipefail
+          git push origin HEAD:main
+          git push origin "refs/tags/${{ steps.release.outputs.version }}"
 
       # GitHub Release (kept here for now to validate mechanics; moves to the
       # publish workflow in the target design). The cocogitto-action's `version`
