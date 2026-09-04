@@ -1,3 +1,4 @@
+# kiro-cli --resume-id be13228c-fb8a-40f6-854f-e65acd7d6ea7
 name: Release PoC
 
 on:
@@ -15,11 +16,18 @@ concurrency:
 jobs:
   create-release:
     name: Create release
+    # Runs on every push to main. When there is nothing to release (e.g. the
+    # bot's own bump commit, or no version-bumping commits since the last tag),
+    # cocogitto produces no version and the push/release steps are skipped —
+    # so the job is a harmless no-op.
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
+    permissions:
+      contents: write
     steps:
-      # 1. Mint a token from the installed GitHub App so pushes can pass branch
-      #    protection and re-trigger workflows (the default GITHUB_TOKEN cannot).
+      # Mint a token from the installed GitHub App so the bump commit/tag can be
+      # pushed to protected main and re-trigger workflows (the default
+      # GITHUB_TOKEN cannot). The App is a bypass actor on the tag ruleset.
       - name: Generate GitHub App token
         id: app-token
         uses: actions/create-github-app-token@v1
@@ -39,10 +47,11 @@ jobs:
         with:
           node-version-file: .nvmrc
 
-      # 2. cocogitto bump: computes semver from conventional commits, runs the
-      #    pre_bump_hook (npm version -> writes package.json), creates the bump
-      #    commit + tag.
-      - name: Create semantic release
+      # cocogitto computes the semver from conventional commits, runs the
+      # pre_bump hook (npm version -> bare version in package.json) and creates
+      # the bump commit + v-prefixed tag. `version` output is set only when a
+      # release actually happens (empty otherwise -> no-op).
+      - name: Create release (cocogitto bump)
         id: release
         uses: cocogitto/cocogitto-action@v4
         with:
@@ -51,17 +60,18 @@ jobs:
           git-user: "release-bot[bot]"
           git-user-email: "release-bot[bot]@users.noreply.github.com"
 
-      # 3. Push the bump commit AND the tag using the App token.
+      # Push the bump commit and the tag using the App token.
       - name: Push bump commit and tag
         if: steps.release.outputs.version != ''
         run: git push --follow-tags origin HEAD:main
-        shell: bash
 
-      # 4. (Optional) GitHub Release - kept to mirror the real workflow.
+      # GitHub Release (kept here for now to validate mechanics; moves to the
+      # publish workflow in the target design). cocogitto's version output is
+      # bare, so prefix it with v to match the tag.
       - name: Create GitHub release
         if: steps.release.outputs.version != ''
         uses: softprops/action-gh-release@v2
         with:
           token: ${{ steps.app-token.outputs.token }}
-          tag_name: ${{ steps.release.outputs.version }}
+          tag_name: v${{ steps.release.outputs.version }}
           generate_release_notes: true
