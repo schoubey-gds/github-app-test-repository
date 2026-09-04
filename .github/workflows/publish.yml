@@ -1,0 +1,92 @@
+# Secure npm publish (PoC) — see publish-poc.md for the full design + manual setup.
+#
+# Trigger boundary: this workflow runs ONLY on pushes of v*.*.* tags. It never
+# runs on pull_request or arbitrary branch pushes, so a fork or contributor PR
+# can never reach the publish path. The v* tag created by release.yml (pushed
+# with the GitHub App token) is the trusted handoff signal.
+name: Publish (npm, OIDC staged)
+
+on:
+  push:
+    tags:
+      - "v*.*.*"        # only semver v-tags trigger a publish
+  workflow_dispatch: {} # manual re-run (still gated by the environment below)
+
+# Default to least privilege at the top level.
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false   # never cancel an in-flight publish
+
+jobs:
+  publish:
+    name: Stage publish to npm
+    runs-on: ubuntu-latest
+    # Human gate: this environment must be configured in repo Settings with
+    # required reviewers and a v*.*.* tag deployment restriction. Every run
+    # pauses here until a reviewer approves. npm's trusted publisher is bound
+    # to this environment name ("npm-publish").
+    environment: npm-publish
+    permissions:
+      id-token: write   # REQUIRED for npm OIDC trusted publishing
+      contents: read    # read-only checkout; no write access needed
+    steps:
+      # Check out the exact tag that triggered the run (github.ref = the tag).
+      # fetch-depth: 0 keeps full history available if any tooling needs it.
+      # actions/checkout v4.4.0
+      - name: Check out the tagged commit
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 0
+          persist-credentials: false   # no git creds needed after checkout
+
+      # actions/setup-node v4.4.0
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version-file: .nvmrc
+          registry-url: "https://registry.npmjs.org"
+          # Caching is intentionally NOT enabled (the `cache` input is omitted):
+          # release builds should install fresh from the lockfile every time.
+
+      # Integrity gate (replay / wrong-artifact defense): the tag being
+      # published MUST match the version in package.json. A stale, manual, or
+      # mismatched tag fails fast here, before anything is staged to npm.
+      - name: Verify tag matches package.json version
+        run: |
+          set -euo pipefail
+          TAG_VERSION="${GITHUB_REF_NAME#v}"          # strip leading v
+          PKG_VERSION="$(node -p "require('./package.json').version")"
+          echo "tag=${TAG_VERSION} package.json=${PKG_VERSION}"
+          if [ "${TAG_VERSION}" != "${PKG_VERSION}" ]; then
+            echo "::error::Tag version (${TAG_VERSION}) does not match package.json version (${PKG_VERSION})."
+            exit 1
+          fi
+
+      # npm OIDC trusted publishing requires npm CLI >= 11.5.1. The runner's
+      # bundled npm may be older, so upgrade explicitly.
+      - name: Ensure npm >= 11.5.1
+        run: npm install -g npm@latest
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build (if a build script exists)
+        run: npm run build --if-present
+
+      - name: Test (if a test script exists)
+        run: npm test --if-present
+
+      # Staged publish via OIDC. No NODE_AUTH_TOKEN / npm token anywhere:
+      # authentication is the short-lived OIDC credential (id-token: write).
+      # Provenance is emitted AUTOMATICALLY for a public repo + public package
+      # under OIDC, so we do NOT pass --provenance.
+      #
+      # `npm stage publish` holds the version privately until a maintainer
+      # approves it with 2FA on npmjs.com (or via `npm stage approve`), which
+      # cannot be done over OIDC — that manual step is the final gate.
+      - name: Stage publish to npm (OIDC, auto provenance)
+        run: npm stage publish
