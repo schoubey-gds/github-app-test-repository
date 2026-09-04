@@ -67,9 +67,12 @@ jobs:
           fi
 
       # npm OIDC trusted publishing requires npm CLI >= 11.5.1. The runner's
-      # bundled npm may be older, so upgrade explicitly.
+      # bundled npm may be older, so upgrade explicitly. We pin to the npm 12.x
+      # line rather than @latest so a future major bump can't outrun the Node
+      # version pinned in .nvmrc. npm 12.x requires Node >= 22.22.2, which our
+      # pinned Node 22.22.3 satisfies.
       - name: Ensure npm >= 11.5.1
-        run: npm install -g npm@latest
+        run: npm install -g "npm@^12"
 
       - name: Install dependencies
         run: npm ci
